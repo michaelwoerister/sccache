@@ -587,7 +587,7 @@ pub fn parse_arguments(
             let mut args = match arg.get_data() {
                 Some(SplitDwarf) | Some(TestCoverage) | Some(Coverage) | Some(DoCompilation)
                 | Some(Language(_)) | Some(Output(_)) | Some(TooHardFlag) | Some(XClang(_))
-                | Some(TooHard(_)) => cannot_cache!(arg
+                | Some(TooHard(_)) | Some(ProfileUse(_)) => cannot_cache!(arg
                     .flag_str()
                     .unwrap_or("Can't handle complex arguments through clang",)),
                 None => match arg {
@@ -605,6 +605,7 @@ pub fn parse_arguments(
                     profile_generate = true;
                     &mut common_args
                 }
+
                 Some(ExtraHashFile(path)) => {
                     extra_hash_files.push(cwd.join(path));
                     &mut common_args

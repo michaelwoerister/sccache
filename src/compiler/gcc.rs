@@ -46,7 +46,7 @@ impl CCompilerImpl for GCC {
         arguments: &[OsString],
         cwd: &Path,
     ) -> CompilerArguments<ParsedArguments> {
-        parse_arguments(arguments, cwd, &ARGS[..], self.gplusplus)
+        parse_arguments(arguments, cwd, &ARGS[..], self.gplusplus, CCompilerKind::GCC)
     }
 
     fn preprocess<T>(
@@ -119,6 +119,7 @@ ArgData! { pub
     Language(OsString),
     SplitDwarf,
     ProfileGenerate,
+    ProfileUse(PathBuf),
     TestCoverage,
     Coverage,
     ExtraHashFile(PathBuf),
@@ -169,7 +170,7 @@ counted_array!(pub static ARGS: [ArgInfo<ArgData>; _] = [
     flag!("-fplugin=libcc1plugin", TooHardFlag),
     flag!("-fprofile-arcs", ProfileGenerate),
     flag!("-fprofile-generate", ProfileGenerate),
-    take_arg!("-fprofile-use", OsString, Concatenated, TooHard),
+    take_arg!("-fprofile-use", PathBuf, Concatenated('='), ProfileUse),
     flag!("-frepo", TooHardFlag),
     flag!("-fsyntax-only", TooHardFlag),
     flag!("-ftest-coverage", TestCoverage),
@@ -214,6 +215,7 @@ pub fn parse_arguments<S>(
     cwd: &Path,
     arg_info: S,
     plusplus: bool,
+    compiler_kind: CCompilerKind,
 ) -> CompilerArguments<ParsedArguments>
 where
     S: SearchableArgInfo<ArgData>,
@@ -275,6 +277,14 @@ where
                     OsString::from(arg.flag_str().expect("Compilation flag expected"));
             }
             Some(ProfileGenerate) => profile_generate = true,
+            Some(ProfileUse(_)) => {
+                if compiler_kind != CCompilerKind::Clang {
+                    cannot_cache!(
+                        arg.flag_str().unwrap(),
+                        "only Clang supported".into()
+                    )
+                }
+            },
             Some(TestCoverage) => outputs_gcno = true,
             Some(Coverage) => {
                 outputs_gcno = true;
@@ -341,6 +351,20 @@ where
             | Some(Arch(_))
             | Some(PassThrough(_))
             | Some(PassThroughPath(_)) => &mut common_args,
+            Some(ProfileUse(path)) => {
+                debug_assert!(compiler_kind == CCompilerKind::Clang);
+
+                let mut path = cwd.join(path);
+
+                // Clang allows specifying a directory here, in which case it
+                // will look for the file `default.profdata` in that directory.
+                if path.is_dir() {
+                    path.push("default.profdata");
+                }
+
+                extra_hash_files.push(path);
+                &mut common_args
+            }
             Some(ExtraHashFile(path)) => {
                 extra_hash_files.push(cwd.join(path));
                 &mut common_args
@@ -376,6 +400,7 @@ where
         let args = match arg.get_data() {
             Some(SplitDwarf)
             | Some(ProfileGenerate)
+            | Some(ProfileUse(_))
             | Some(TestCoverage)
             | Some(Coverage)
             | Some(DoCompilation)
@@ -742,7 +767,7 @@ mod test {
         plusplus: bool,
     ) -> CompilerArguments<ParsedArguments> {
         let args = arguments.iter().map(OsString::from).collect::<Vec<_>>();
-        parse_arguments(&args, ".".as_ref(), &ARGS[..], plusplus)
+        parse_arguments(&args, ".".as_ref(), &ARGS[..], plusplus, CCompilerKind::GCC)
     }
 
     #[test]

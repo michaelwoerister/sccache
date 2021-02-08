@@ -54,6 +54,7 @@ impl CCompilerImpl for Clang {
             cwd,
             (&gcc::ARGS[..], &ARGS[..]),
             self.clangplusplus,
+            CCompilerKind::Clang,
         )
     }
 
@@ -103,7 +104,7 @@ impl CCompilerImpl for Clang {
     }
 }
 
-counted_array!(pub static ARGS: [ArgInfo<gcc::ArgData>; _] = [
+pub static ARGS: &[ArgInfo<gcc::ArgData>] = &[
     take_arg!("--serialize-diagnostics", OsString, Separated, PassThrough),
     take_arg!("--target", OsString, Separated, PassThrough),
     take_arg!("-Xclang", OsString, Separated, XClang),
@@ -118,7 +119,7 @@ counted_array!(pub static ARGS: [ArgInfo<gcc::ArgData>; _] = [
     take_arg!("-fplugin", PathBuf, CanBeConcatenated('='), ExtraHashFile),
     flag!("-fprofile-instr-generate", ProfileGenerate),
     // Can be either -fprofile-instr-use or -fprofile-instr-use=path
-    take_arg!("-fprofile-instr-use", OsString, Concatenated, TooHard),
+    take_arg!("-fprofile-instr-use", PathBuf, Concatenated('='), ProfileUse),
     take_arg!("-fsanitize-blacklist", PathBuf, Concatenated('='), ExtraHashFile),
     take_arg!("-gcc-toolchain", OsString, Separated, PassThrough),
     take_arg!("-include-pch", PathBuf, CanBeSeparated, PreprocessorArgumentPath),
@@ -127,7 +128,7 @@ counted_array!(pub static ARGS: [ArgInfo<gcc::ArgData>; _] = [
     take_arg!("-plugin-arg", OsString, Concatenated('-'), PassThrough),
     take_arg!("-target", OsString, Separated, PassThrough),
     flag!("-verify", PreprocessorArgumentFlag),
-]);
+];
 
 #[cfg(test)]
 mod test {
@@ -403,4 +404,55 @@ mod test {
         let a = parses!("-c", "foo.c", "-o", "foo.o");
         assert_eq!(a.color_mode, ColorMode::Auto);
     }
+
+    #[test]
+    fn test_parse_arguments_profile_instr_use() {
+        let a = parses!(
+            "-c",
+            "foo.c",
+            "-o",
+            "foo.o",
+            "-fprofile-instr-use=foo.profdata"
+        );
+        assert_eq!(ovec!["-fprofile-instr-use=foo.profdata"], a.common_args);
+        assert_eq!(
+            ovec![std::env::current_dir().unwrap().join("foo.profdata")],
+            a.extra_hash_files
+        );
+    }
+
+    #[test]
+    fn test_parse_arguments_profile_use() {
+        let a = parses!(
+            "-c",
+            "foo.c",
+            "-o",
+            "foo.o",
+            "-fprofile-use=xyz.profdata"
+        );
+
+        assert_eq!(ovec!["-fprofile-use=xyz.profdata"], a.common_args);
+        assert_eq!(
+            ovec![std::env::current_dir().unwrap().join("xyz.profdata")],
+            a.extra_hash_files
+        );
+    }
+
+    #[test]
+    fn test_parse_arguments_profile_use_with_directory() {
+        let a = parses!(
+            "-c",
+            "foo.c",
+            "-o",
+            "foo.o",
+            "-fprofile-use=."
+        );
+
+        assert_eq!(ovec!["-fprofile-use=."], a.common_args);
+        assert_eq!(
+            ovec![std::env::current_dir().unwrap().join("default.profdata")],
+            a.extra_hash_files
+        );
+    }
+
 }
