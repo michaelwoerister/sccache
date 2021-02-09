@@ -668,7 +668,12 @@ struct SccacheService<C: CommandCreatorSync> {
 
     /// Information tracking how many services (connected clients) are active.
     info: ActiveInfo,
+
+
+    file_digest_cache: FileDigestCache,
 }
+
+pub type FileDigestCache = Arc<Mutex<HashMap<PathBuf, (FileTime, String)>>>;
 
 type SccacheRequest = Message<Request, Body<()>>;
 type SccacheResponse = Message<Response, Body<Response>>;
@@ -764,6 +769,7 @@ where
             creator: C::new(client),
             tx,
             info,
+            file_digest_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1110,6 +1116,7 @@ where
             env_vars,
             cache_control,
             self.pool.clone(),
+            &self.file_digest_cache,
         );
         let me = self.clone();
         let kind = compiler.kind();

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mock_command::{CommandChild, RunCommand};
+use crate::{mock_command::{CommandChild, RunCommand}, server::FileDigestCache};
 use blake3::Hasher as blake3_Hasher;
 use byteorder::{BigEndian, ByteOrder};
+use filetime::FileTime;
 use futures::{future, Future};
 use futures_03::executor::ThreadPool;
 use futures_03::future::TryFutureExt;
@@ -59,11 +60,15 @@ impl Digest {
 
     /// Calculate the BLAKE3 digest of the contents of `path`, running
     /// the actual hash computation on a background thread in `pool`.
-    pub fn file<T>(path: T, pool: &ThreadPool) -> SFuture<String>
+    pub fn file<T>(
+        path: T,
+        pool: &ThreadPool,
+        file_digest_cache: FileDigestCache
+    ) -> SFuture<String>
     where
         T: AsRef<Path>,
     {
-        Self::reader(path.as_ref().to_owned(), pool)
+        Self::reader(path.as_ref().to_owned(), pool, file_digest_cache)
     }
 
     /// Calculate the BLAKE3 digest of the contents read from `reader`.
@@ -84,11 +89,32 @@ impl Digest {
 
     /// Calculate the BLAKE3 digest of the contents of `path`, running
     /// the actual hash computation on a background thread in `pool`.
-    pub fn reader(path: PathBuf, pool: &ThreadPool) -> SFuture<String> {
+    pub fn reader(path: PathBuf, pool: &ThreadPool, file_digest_cache: FileDigestCache) -> SFuture<String> {
         Box::new(pool.spawn_fn(move || -> Result<_> {
+
+            let cached_digest = {
+                let file_digest_cache = file_digest_cache.lock().unwrap();
+                file_digest_cache.get(&path).cloned()
+            };
+
+            let current_file_time = FileTime::from_last_modification_time(&path.metadata()?);
+
+            if let Some((file_time, digest)) = cached_digest {
+                if file_time == current_file_time {
+                    return Ok(digest.clone());
+                }
+            }
+
             let reader = File::open(&path)
                 .with_context(|| format!("Failed to open file for hashing: {:?}", path))?;
-            Digest::reader_sync(reader)
+            let digest = Digest::reader_sync(reader);
+
+            if let Ok(ref digest) = digest {
+                let entry = (current_file_time, digest.clone());
+                file_digest_cache.lock().unwrap().insert(path.clone(), entry);
+            }
+
+            digest
         }))
     }
 
@@ -125,15 +151,21 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Calculate the digest of each file in `files` on background threads in
 /// `pool`.
-pub fn hash_all(files: &[PathBuf], pool: &ThreadPool) -> SFuture<Vec<String>> {
+pub fn hash_all(
+    files: &[PathBuf],
+    pool: &ThreadPool,
+    file_digest_cache: &FileDigestCache,
+) -> SFuture<Vec<String>> {
     let start = time::Instant::now();
     let count = files.len();
     let pool = pool.clone();
+    let file_digest_cache = file_digest_cache.clone();
+
     Box::new(
         future::join_all(
             files
                 .iter()
-                .map(move |f| Digest::file(f, &pool))
+                .map(move |f| Digest::file(f, &pool, file_digest_cache.clone()))
                 .collect::<Vec<_>>(),
         )
         .map(move |hashes| {

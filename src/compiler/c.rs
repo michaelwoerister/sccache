@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::compiler::{
+use crate::{compiler::{
     Cacheable, ColorMode, Compilation, CompileCommand, Compiler, CompilerArguments, CompilerHasher,
     CompilerKind, HashResult,
-};
+}, server::FileDigestCache};
 #[cfg(feature = "dist-client")]
 use crate::compiler::{DistPackagers, NoopOutputsRewriter};
 use crate::dist;
@@ -211,8 +211,10 @@ where
         version: Option<String>,
         pool: &ThreadPool,
     ) -> SFuture<CCompiler<I>> {
+        let file_digest_cache = FileDigestCache::default();
+
         Box::new(
-            Digest::file(executable.clone(), &pool).map(move |digest| CCompiler {
+            Digest::file(executable.clone(), &pool, file_digest_cache).map(move |digest| CCompiler {
                 executable,
                 executable_digest: {
                     if let Some(version) = version {
@@ -277,6 +279,7 @@ where
         env_vars: Vec<(OsString, OsString)>,
         may_dist: bool,
         pool: &ThreadPool,
+        file_digest_cache: &FileDigestCache,
         rewrite_includes_only: bool,
     ) -> SFuture<HashResult> {
         let me = *self;
@@ -301,7 +304,7 @@ where
             e
         });
         let out_pretty = parsed_args.output_pretty().into_owned();
-        let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone());
+        let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone(), &file_digest_cache);
         let outputs = parsed_args.outputs.clone();
         let args_cwd = cwd.clone();
 

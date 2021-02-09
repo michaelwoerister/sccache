@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::cache::{Cache, CacheWrite, DecompressionFailure, Storage};
+use crate::{cache::{Cache, CacheWrite, DecompressionFailure, Storage}, server::FileDigestCache};
 use crate::compiler::c::{CCompiler, CCompilerKind};
 use crate::compiler::clang::Clang;
 use crate::compiler::diab::Diab;
@@ -172,6 +172,7 @@ where
         env_vars: Vec<(OsString, OsString)>,
         may_dist: bool,
         pool: &ThreadPool,
+        file_digest_cache: &FileDigestCache,
         rewrite_includes_only: bool,
     ) -> SFuture<HashResult>;
 
@@ -191,6 +192,7 @@ where
         env_vars: Vec<(OsString, OsString)>,
         cache_control: CacheControl,
         pool: ThreadPool,
+        file_digest_cache: &FileDigestCache,
     ) -> SFuture<(CompileResult, process::Output)> {
         let out_pretty = self.output_pretty().into_owned();
         debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
@@ -206,6 +208,7 @@ where
             env_vars,
             may_dist,
             &pool,
+            file_digest_cache,
             rewrite_includes_only,
         );
         Box::new(result.then(move |res| -> SFuture<_> {
@@ -1331,6 +1334,7 @@ LLVM version: 6.0",
         let f = TestFixture::new();
         let creator = new_creator();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let arguments = ovec!["-c", "foo.c", "-o", "foo.o"];
         let cwd = f.tempdir.path();
 
@@ -1359,7 +1363,14 @@ LLVM version: 6.0",
                     o => panic!("Bad result from parse_arguments: {:?}", o),
                 };
                 hasher
-                    .generate_hash_key(&creator, cwd.to_path_buf(), vec![], false, &pool, false)
+                    .generate_hash_key(
+                        &creator,
+                        cwd.to_path_buf(),
+                        vec![],
+                        false,
+                        &pool,
+                        &file_digest_cache,
+                        false)
                     .wait()
                     .unwrap()
             })
@@ -1389,6 +1400,7 @@ LLVM version: 6.0",
         let creator = new_creator();
         let f = TestFixture::new();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let mut runtime = Runtime::new().unwrap();
         let storage = DiskCache::new(&f.tempdir.path().join("cache"), u64::MAX, &pool);
         let storage: Arc<dyn Storage> = Arc::new(storage);
@@ -1443,6 +1455,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool.clone(),
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1477,6 +1490,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool,
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1495,6 +1509,7 @@ LLVM version: 6.0",
         let creator = new_creator();
         let f = TestFixture::new();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let mut runtime = Runtime::new().unwrap();
         let storage = DiskCache::new(&f.tempdir.path().join("cache"), u64::MAX, &pool);
         let storage: Arc<dyn Storage> = Arc::new(storage);
@@ -1544,6 +1559,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool.clone(),
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1578,6 +1594,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool,
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1597,6 +1614,7 @@ LLVM version: 6.0",
         let creator = new_creator();
         let f = TestFixture::new();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let mut runtime = Runtime::new().unwrap();
         let storage = MockStorage::new();
         let storage: Arc<MockStorage> = Arc::new(storage);
@@ -1652,6 +1670,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool,
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1676,6 +1695,7 @@ LLVM version: 6.0",
         let creator = new_creator();
         let f = TestFixture::new();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let mut runtime = Runtime::new().unwrap();
         let storage = DiskCache::new(&f.tempdir.path().join("cache"), u64::MAX, &pool);
         let storage: Arc<dyn Storage> = Arc::new(storage);
@@ -1734,6 +1754,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool.clone(),
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1761,6 +1782,7 @@ LLVM version: 6.0",
                 vec![],
                 CacheControl::ForceRecache,
                 pool,
+                &file_digest_cache,
             )
             .wait()
             .unwrap();
@@ -1784,6 +1806,7 @@ LLVM version: 6.0",
         let creator = new_creator();
         let f = TestFixture::new();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let mut runtime = Runtime::new().unwrap();
         let storage = DiskCache::new(&f.tempdir.path().join("cache"), u64::MAX, &pool);
         let storage: Arc<dyn Storage> = Arc::new(storage);
@@ -1836,6 +1859,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::Default,
                     pool,
+                    &file_digest_cache,
                 )
             }))
             .unwrap();
@@ -1855,6 +1879,7 @@ LLVM version: 6.0",
         let creator = new_creator();
         let f = TestFixture::new();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let dist_clients = vec![
             test_dist::ErrorPutToolchainClient::new(),
             test_dist::ErrorAllocJobClient::new(),
@@ -1922,6 +1947,7 @@ LLVM version: 6.0",
                     vec![],
                     CacheControl::ForceRecache,
                     pool.clone(),
+                    &file_digest_cache,
                 )
                 .wait()
                 .unwrap();

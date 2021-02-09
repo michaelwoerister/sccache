@@ -1229,15 +1229,16 @@ mod test {
 
     #[test]
     fn test_parse_arguments_pgo() {
+        let only_clang_supported = || Some("only Clang supported".to_owned());
         assert_eq!(
-            CompilerArguments::CannotCache("-fprofile-use", None),
+            CompilerArguments::CannotCache("-fprofile-use", only_clang_supported()),
             parse_arguments_(
                 stringvec!["-c", "foo.c", "-fprofile-use", "-o", "foo.o"],
                 false
             )
         );
         assert_eq!(
-            CompilerArguments::CannotCache("-fprofile-use", None),
+            CompilerArguments::CannotCache("-fprofile-use", only_clang_supported()),
             parse_arguments_(
                 stringvec!["-c", "foo.c", "-fprofile-use=file", "-o", "foo.o"],
                 false

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::compiler::args::*;
+use crate::{compiler::args::*, server::FileDigestCache};
 use crate::compiler::{
     Cacheable, ColorMode, Compilation, CompileCommand, Compiler, CompilerArguments, CompilerHasher,
     CompilerKind, CompilerProxy, HashResult,
@@ -420,7 +420,7 @@ impl Rust {
                     None
                 },
             };
-            hash_all(&libs, &pool).map(move |digests| {
+            hash_all(&libs, &pool, &FileDigestCache::default()).map(move |digests| {
                 Rust {
                     executable,
                     host,
@@ -433,7 +433,7 @@ impl Rust {
 
         #[cfg(not(feature = "dist-client"))]
         return Box::new(sysroot_and_libs.and_then(move |(sysroot, libs)| {
-            hash_all(&libs, &pool).map(move |digests| Rust {
+            hash_all(&libs, &pool, FileDigestCache::default()).map(move |digests| Rust {
                 executable,
                 host,
                 sysroot,
@@ -1222,6 +1222,7 @@ where
         env_vars: Vec<(OsString, OsString)>,
         _may_dist: bool,
         pool: &ThreadPool,
+        file_digest_cache: &FileDigestCache,
         _rewrite_includes_only: bool,
     ) -> SFuture<HashResult> {
         let RustHasher {
@@ -1283,18 +1284,21 @@ where
             &env_vars,
             pool,
         );
-        let source_files_and_hashes = source_files.and_then(move |source_files| {
-            hash_all(&source_files, &source_hashes_pool)
-                .map(|source_hashes| (source_files, source_hashes))
-        });
+        let source_files_and_hashes = {
+            let file_digest_cache = file_digest_cache.clone();
+            source_files.and_then(move |source_files| {
+                hash_all(&source_files, &source_hashes_pool, &file_digest_cache)
+                    .map(|source_hashes| (source_files, source_hashes))
+            })
+        };
         // Hash the contents of the externs listed on the commandline.
         trace!("[{}]: hashing {} externs", crate_name, externs.len());
         let abs_externs = externs.iter().map(|e| cwd.join(e)).collect::<Vec<_>>();
-        let extern_hashes = hash_all(&abs_externs, pool);
+        let extern_hashes = hash_all(&abs_externs, pool, file_digest_cache);
         // Hash the contents of the staticlibs listed on the commandline.
         trace!("[{}]: hashing {} staticlibs", crate_name, staticlibs.len());
         let abs_staticlibs = staticlibs.iter().map(|s| cwd.join(s)).collect::<Vec<_>>();
-        let staticlib_hashes = hash_all(&abs_staticlibs, pool);
+        let staticlib_hashes = hash_all(&abs_staticlibs, pool, file_digest_cache);
         let creator = creator.clone();
         let hashes = source_files_and_hashes.join3(extern_hashes, staticlib_hashes);
         Box::new(hashes.and_then(
@@ -2957,6 +2961,7 @@ c:/foo/bar.rs:
         mock_dep_info(&creator, &["foo.rs", "bar.rs"]);
         mock_file_names(&creator, &["foo.rlib", "foo.a"]);
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         let res = hasher
             .generate_hash_key(
                 &creator,
@@ -2969,6 +2974,7 @@ c:/foo/bar.rs:
                 .to_vec(),
                 false,
                 &pool,
+                &file_digest_cache,
                 false,
             )
             .wait()
@@ -3047,6 +3053,7 @@ c:/foo/bar.rs:
 
         let creator = new_creator();
         let pool = ThreadPool::sized(1);
+        let file_digest_cache = FileDigestCache::default();
         mock_dep_info(&creator, &["foo.rs"]);
         mock_file_names(&creator, &["foo.rlib"]);
         hasher
@@ -3056,6 +3063,7 @@ c:/foo/bar.rs:
                 env_vars.to_owned(),
                 false,
                 &pool,
+                &file_digest_cache,
                 false,
             )
             .wait()
